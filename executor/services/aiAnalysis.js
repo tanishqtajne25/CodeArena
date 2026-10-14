@@ -1,8 +1,14 @@
+require('dotenv').config();
 const Groq = require('groq-sdk');
 
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,  
-});
+function getGroqClient() {
+    const key = process.env.GROQ_API_KEY;
+    if (!key || key === 'dummy_groq_key') {
+        throw new Error('Valid GROQ_API_KEY is not defined in executor/.env. Please add your Groq API key (starts with gsk_).');
+    }
+    return new Groq({ apiKey: key });
+}
+
 
 async function analyzeCode({
     problem,
@@ -145,6 +151,7 @@ Use markdown with clear sections:
         </response_guidelines>`;
 
     // Optimized model parameters for code analysis
+    const groq = getGroqClient();
     const stream = await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
         messages: [

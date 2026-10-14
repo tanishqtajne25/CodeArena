@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const { executeCode } = require('./executor');
 const { submissionQueue } = require('./queue');

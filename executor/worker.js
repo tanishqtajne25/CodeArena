@@ -1,13 +1,14 @@
+require('dotenv').config();
 const { Worker } = require('bullmq');
 const { connection } = require('./queue');
 const pool = require('./db');
 const { executeCode } = require('./executor');
-const { createClient } = require('redis') // TO solve the problem that worker will connect as a client to server. Removing seperation with server.
+const { createClient } = require('redis');
 
-//Redis Pub --- Worker publishes results.
+// Redis Pub --- Worker publishes results.
 const publisher = createClient({
     socket: {
-        host: 'redis' ,
+        host: process.env.REDIS_HOST || 'localhost',
         port: 6379
     }
 });

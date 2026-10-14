@@ -53,7 +53,8 @@ export default function Editor() {
 
     // Setup Socket.io connection
     useEffect(() => {                                         //useEffect to avoid infinte call
-        socketRef.current = io('http://15.206.170.214:3000', {
+        const socketUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        socketRef.current = io(socketUrl, {
             withCredentials: true
         });
 
@@ -207,9 +208,10 @@ export default function Editor() {
         setAiLoading(true);
 
         try {
-         const response = await fetch(
-            'http://15.206.170.214:3000/analyze',      
-            {
+            const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+            const response = await fetch(
+                `${apiBase}/analyze`,      
+                {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
