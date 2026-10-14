@@ -8,7 +8,7 @@ function getGroqClient() {
     }
     return new Groq({ apiKey: key });
 }
-
+//
 
 async function analyzeCode({
     problem,
@@ -153,7 +153,7 @@ Use markdown with clear sections:
     // Optimized model parameters for code analysis
     const groq = getGroqClient();
     const stream = await groq.chat.completions.create({
-        model: "llama-3.1-8b-instant",
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user',   content: userPrompt   }
