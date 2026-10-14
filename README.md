@@ -1,236 +1,229 @@
 # 🚀 CodeArena
 
-A distributed code execution platform — built from scratch with 
-Docker sandboxing, Redis job queues, real-time WebSocket results, 
-and AI-powered code analysis.
+A distributed code execution platform and online judge — built from scratch with Docker sandboxing, Redis job queues, real-time WebSocket communication, Lamport logical clock synchronization, and AI-powered code analysis.
 
-**Live Demo:** http://15.206.170.214
+**Live Demo:** http://15.206.170.214  
+**Distributed Systems Curriculum Guide:** [CODEARENA_DISTRIBUTED_SYSTEMS_GUIDE.md](./CODEARENA_DISTRIBUTED_SYSTEMS_GUIDE.md)
 
 ---
 
 ## 📖 Overview
 
-CodeArena lets users write, submit, and execute code (Python, C++) 
-against test cases in a secure, isolated environment — similar to 
-the core infrastructure behind platforms like HackerRank and 
-LeetCode. Every submission runs inside a sandboxed Docker container 
-with strict resource limits, gets processed through a distributed 
-job queue, and returns results to the user in real-time via 
-WebSockets — with optional AI-powered feedback on failed attempts.
+CodeArena lets users write, submit, and execute code (Python, C++) against test cases in a secure, isolated environment — similar to the core infrastructure behind platforms like HackerRank, LeetCode, and Judge0. 
+
+Every submission runs inside a sandboxed Docker container with strict resource limits (CPU caps, memory constraints, network isolation), gets processed asynchronously through a distributed job queue (Redis + BullMQ), and streams execution results to the client in real-time via WebSockets. The system also features Lamport Logical Clock synchronization across all distributed nodes for causal event ordering ($a \rightarrow b$) and contextual AI feedback for failed test cases.
 
 ---
 
 ## ✨ Features
 
-- **Sandboxed Code Execution** — Python & C++ code runs in isolated 
-  Docker containers with memory limits, CPU caps, and zero network 
-  access
-- **Distributed Job Queue** — Redis + BullMQ handles concurrent 
-  submissions without overloading the server
-- **Real-Time Results** — WebSocket + Redis Pub/Sub delivers 
-  execution results instantly, no polling required
-- **Judge System** — Code runs against visible and hidden test 
-  cases with pass/fail breakdown
-- **AI Code Analysis** — Groq (Llama3) powered contextual feedback 
-  on failed submissions, using problem details and submission 
-  history
-- **Authentication & Security** — JWT with refresh token rotation, 
-  Redis-based token blacklisting, bcrypt password hashing, and 
-  role-based access control (RBAC)
-- **Admin Panel** — Manage problems, test cases, submissions, and 
-  users
-- **Rate Limiting** — Protects against abuse on auth and execution 
-  endpoints
+- **Sandboxed Code Execution** — Python & C++ code runs in ephemeral, isolated Docker containers with memory limits (128MB–256MB), CPU limits (0.5 cores), and complete network isolation.
+- **Distributed Job Queue** — Redis + BullMQ decouples the API gateway from execution workers, enabling graceful queuing and horizontal scalability.
+- **Real-Time Bidirectional Results** — WebSocket + Redis Pub/Sub delivers instant test case pass/fail feedback without client-side polling.
+- **🕒 Lamport Logical Clock Synchronization** — Implements Lamport's timestamp algorithm across Client, Server, and Worker nodes, complete with an in-browser live causal timeline visualization and invariant verification.
+- **Judge System** — Automated evaluation against visible and hidden test cases with execution time, memory usage, and diff breakdowns.
+- **AI Code Analysis** — Groq (Llama-3) powered contextual diagnostics on failed submissions with hints and edge-case suggestions.
+- **Production-Grade Auth & Security** — JWT with refresh token rotation, Redis-based token blacklisting on logout, bcrypt hashing (12 rounds), and Role-Based Access Control (RBAC).
+- **Comprehensive Admin Panel** — Dedicated dashboard to manage problems, test cases, submissions, and users.
+- **Rate Limiting** — Redis-backed sliding window rate limiters protecting authentication and code execution endpoints.
 
-  ┌─────────────┐
+---
 
-│   Browser    │  React + Monaco Editor + Socket.io client
+## 🏗️ Architecture
 
-└──────┬───────┘
-
-│ HTTP / WebSocket
-
-┌──────▼───────┐
-
-│  Node.js      │  Express + Socket.io
-
-│  Server       │  Auth, REST API, WebSocket gateway
-
-└──┬─────────┬──┘
-
-│         │
-
-┌────▼───┐ ┌──▼──────────┐
-
-│ Redis   │ │ PostgreSQL  │
-
-│ Queue + │ │ Users,      │
-
-│ Pub/Sub │ │ Problems,   │
-
-│         │ │ Submissions │
-
-└────┬────┘ └─────────────┘
-
-│
-
-┌────▼─────┐
-
-│ Worker    │  Picks jobs, runs Docker sandboxes
-
-└────┬─────┘
-
-│
-
-┌────▼──────────┐
-
-│ Docker          │  Isolated Python / C++ containers
-
-│ Sandboxes        │  Memory + CPU limited, no network
-
-└─────────────────┘
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Client / Browser                           │
+│           React 18 + Monaco Code Editor + Socket.io             │
+│            Lamport Clock State: L_client (Rule 1 & 2)           │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ HTTP REST / WebSocket
+┌───────────────────────────────▼─────────────────────────────────┐
+│                    API Gateway (Node.js/Express)                │
+│                 Port 3000 | Lamport Clock: L_server             │
+│            Auth, Problem Catalog, Submission Producer           │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+               ┌────────────────┴────────────────┐
+               │                                 │
+┌──────────────▼─────────────┐    ┌──────────────▼─────────────┐
+│  Redis (Port 6379)         │    │  PostgreSQL (Port 5432)    │
+│  - BullMQ 'code-submission'│    │  - Users, Problems,        │
+│  - Pub/Sub Channel 'job-*' │    │    Submissions, Test Cases │
+│  - Token Blacklist & Limits│    │  - ACID Relational Store   │
+└──────────────┬─────────────┘    └────────────────────────────┘
+               │
+┌──────────────▼─────────────────────────────────────────────────┐
+│                   Worker Service (Node.js)                     │
+│                  Lamport Clock: L_worker                        │
+│            Picks jobs, manages Docker sandboxes                │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ Docker Engine API (npipe / sock)
+┌───────────────────────────────▼─────────────────────────────────┐
+│                     Ephemeral Sandboxes                         │
+│            [codearena-python]     [codearena-cpp]               │
+│          CPU: 0.5 | RAM: 128MB | Net: None | Auto-destroy       │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer        | Technology                                      |
-|--------------|--------------------------------------------------|
-| Frontend     | React, Vite, Monaco Editor                       |
-| Backend      | Node.js, Express.js, Socket.io                   |
-| Queue        | Redis, BullMQ                                    |
-| Database     | PostgreSQL                                       |
-| Auth         | JWT, bcrypt, Redis (token blacklisting)          |
-| Execution    | Docker, Docker SDK (dockerode)                   |
-| AI           | Groq API (Llama3), LangChain, Prompt Engineering |
-| Deployment   | AWS EC2, Docker Compose, Nginx (reverse proxy)   |
-
----
-
-## 🔒 Security
-
-- JWT access + refresh token rotation
-- Redis-based token blacklisting on logout
-- bcrypt password hashing (12 rounds)
-- Role-Based Access Control (RBAC)
-- Rate limiting on auth and execution endpoints
-- httpOnly, secure cookies
-- Docker sandbox isolation: memory limits, CPU caps, no network 
-  access, auto-destroyed containers
-- Environment variables for all secrets (never committed)
+| Layer | Technology |
+|---|---|
+| **Frontend** | React 18, Vite, Monaco Editor, Tailwind CSS / Vanilla CSS, Socket.io Client |
+| **Backend / Gateway** | Node.js, Express.js, Socket.io Server, dotenv |
+| **Distributed Queue** | Redis 7, BullMQ |
+| **Database** | PostgreSQL 15 / 16 (pg Pool with parameterized queries) |
+| **Synchronization** | Lamport Logical Clocks (Causal Ordering, Invariant Validation) |
+| **Execution Sandbox** | Docker, Docker Engine API (`dockerode`), Alpine / Debian Slim |
+| **AI Analysis** | Groq API (Llama 3), Contextual Prompt Engineering |
+| **Authentication** | JWT Access & Refresh Tokens, Redis Token Blacklisting, bcryptjs |
 
 ---
 
 ## 📂 Project Structure
-codearena/
 
-├── executor/             # Node.js backend
-
-│   ├── server.js         # Express + Socket.io entry point
-
-│   ├── worker.js         # BullMQ job processor
-
-│   ├── executor.js       # Docker sandbox execution logic
-
-│   ├── db.js              # PostgreSQL connection
-
-│   ├── queue.js           # BullMQ queue setup
-
-│   ├── middleware/        # Auth, RBAC
-
-│   ├── routes/             # Auth, admin routes
-
-│   └── services/            # AI analysis (Groq)
-
-├── sandboxes/
-
-│   ├── python/             # Python sandbox Dockerfile
-
-│   └── cpp/                  # C++ sandbox Dockerfile
-
-├── frontend/                 # React application
-
-│   └── src/
-
-│       ├── pages/             # Editor, Admin, Login, etc.
-
-│       ├── context/            # Auth context
-
-│       └── api/                  # Axios config
-
-└── docker-compose.yml          # Multi-container orchestration
+```
+CodeArena/
+├── CODEARENA_DISTRIBUTED_SYSTEMS_GUIDE.md  # Comprehensive B.Tech DS curriculum guide
+├── README.md                               # Project documentation
+├── SETUP_INSTRUCTIONS.md                   # Detailed setup reference
+├── backend/
+│   ├── docker-compose.yml                  # Container orchestration
+│   └── sandboxes/                          # Sandbox Docker definitions
+│       ├── python/Dockerfile               # Python execution sandbox
+│       └── cpp/Dockerfile                  # C++ compilation & execution sandbox
+├── executor/                               # Backend execution service & API
+│   ├── server.js                           # Express API Gateway & WebSocket hub
+│   ├── worker.js                           # BullMQ background job consumer
+│   ├── executor.js                         # Dockerode container lifecycle manager
+│   ├── queue.js                            # BullMQ queue & worker configuration
+│   ├── db.js                               # PostgreSQL pool connection
+│   ├── middleware/                         # JWT verification & RBAC guards
+│   ├── routes/                             # Auth, Admin, and Problem routes
+│   └── services/                           # AI analysis integration (Groq)
+└── frontend/                               # React single-page application
+    ├── src/
+    │   ├── pages/                          # Editor (with Lamport UI), Admin, Login, etc.
+    │   ├── context/                        # Auth context & state management
+    │   └── api/                            # Axios interceptor & API client
+    └── package.json
+```
 
 ---
 
 ## 🚀 Running Locally
 
+You can run CodeArena in two ways: **Hybrid / Local Mode (Recommended for Development)** or **Full Docker Mode**.
+
 ### Prerequisites
-- Docker & Docker Compose
-- Node.js 18+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
+- [Node.js](https://nodejs.org/) v18 or v20+
+- [PostgreSQL](https://www.postgresql.org/) (running locally on port 5432)
 
-### Setup
+---
 
-````bash
-# Clone the repository
-git clone https://github.com/piyushwaghmare/codearena.git
-cd codearena
+### Method A: Local / Hybrid Mode (Recommended)
 
-# Create .env file with required variables
-# (see .env.example)
+This mode runs Redis and execution sandboxes inside Docker, while running the Node.js services and Vite frontend natively for instant debugging.
 
-# Build sandbox images
-docker build -t codearena-python ./sandboxes/python
-docker build -t codearena-cpp ./sandboxes/cpp
+#### 1. Start Docker Sandbox Images & Redis
+```bash
+# From the project root:
+# 1. Build the execution sandbox containers
+docker build -t codearena-python ./backend/sandboxes/python
+docker build -t codearena-cpp ./backend/sandboxes/cpp
 
-# Start all services
-docker compose up --build
+# 2. Start the Redis container
+docker run -d --name codearena-redis -p 6379:6379 redis:7-alpine
+# (On subsequent restarts, simply run: docker start codearena-redis)
+```
 
-# Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev
-````
-
-### Environment Variables
-
-````
+#### 2. Configure Environment Variables
+Create `executor/.env`:
+```env
+PORT=3000
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
 POSTGRES_DB=codearena
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your_password
-JWT_SECRET=your_jwt_secret
-JWT_REFRESH_SECRET=your_refresh_secret
-GROQ_API_KEY=your_groq_api_key
-REDIS_HOST=redis
-````
+REDIS_HOST=localhost
+REDIS_PORT=6379
+JWT_SECRET=your_jwt_secret_key_here
+JWT_REFRESH_SECRET=your_jwt_refresh_secret_key_here
+GROQ_API_KEY=your_groq_api_key_optional
+```
+
+#### 3. Start the API Gateway Server (Terminal 1)
+```bash
+cd executor
+npm install
+node server.js
+```
+*(Verify: `Server running on 3000`, `Redis Subscriber Connected`, `PostgreSQL connected`)*
+
+#### 4. Start the Execution Worker (Terminal 2)
+```bash
+cd executor
+node worker.js
+```
+*(Verify: `worker started`, `Worker ready — waiting for jobs...`)*
+
+#### 5. Start the React Frontend (Terminal 3)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Open **`http://localhost:5173/`** in your browser.
 
 ---
 
-## 🎯 What I Learned Building This
+### Method B: Full Docker Compose Mode
 
-This project was built end-to-end as a deep dive into distributed 
-systems engineering:
+```bash
+# Build sandbox images first
+docker build -t codearena-python ./backend/sandboxes/python
+docker build -t codearena-cpp ./backend/sandboxes/cpp
 
-- Designing secure code execution sandboxes with Docker resource 
-  limits and network isolation
-- Building a producer-consumer architecture with Redis/BullMQ for 
-  handling concurrent workloads
-- Implementing real-time bidirectional communication with 
-  WebSockets and Redis Pub/Sub across separate containers
-- Production-grade authentication with token rotation and 
-  blacklisting strategies
-- Prompt engineering for deterministic, context-aware AI feedback
-- Deploying a multi-container application on AWS EC2 with Nginx 
-  as a reverse proxy
+# Start all backend microservices
+cd backend
+docker compose up --build
+
+# In a separate terminal, launch the frontend
+cd frontend
+npm install
+npm run dev
+```
 
 ---
 
-## 📬 Contact
+## 🔒 Security Architecture
 
-**Piyush Waghmare**
-[LinkedIn](https://www.linkedin.com/in/piyushwaghmare11/) · 
-[GitHub](https://github.com/piyushwaghmare) · 
-piyush.waghmare142@gmail.com
+- **Sandbox Confinement:** Containers run with `--network none` (no outbound/inbound socket access), restricting malicious submissions from scanning local networks or initiating DoS attacks.
+- **Resource Constraints:** Hard CPU quota (`CpuQuota: 50000`, `CpuPeriod: 100000`) and memory ceiling (`Memory: 256MB`) prevent fork bombs and memory exhaust attacks.
+- **Ephemeral Lifecycles:** Containers are automatically destroyed (`AutoRemove: true` or `.remove({ force: true })`) immediately upon process completion or timeout.
+- **Authentication:** Access tokens with 15-minute expirations paired with rotating refresh tokens stored in HTTP-only cookies; logged-out tokens are immediately blacklisted in Redis.
+- **SQL Injection Prevention:** 100% parameterized queries via PostgreSQL `pg` pool.
 
-````
+---
 
-## 🏗️ Architecture
+## 📚 Academic & Curriculum Alignment
+
+For students and evaluators reviewing this project for **Distributed Systems (B.Tech Computer Engineering)**:
+- Consult [CODEARENA_DISTRIBUTED_SYSTEMS_GUIDE.md](./CODEARENA_DISTRIBUTED_SYSTEMS_GUIDE.md) for in-depth coverage of:
+  - **Unit I:** Distributed Models, Middleware, OS-level Virtualization vs Hypervisors.
+  - **Unit II:** Inter-Process Communication, RPC vs MOM, WebSockets, At-least-once Delivery.
+  - **Unit III:** Lamport’s Logical Clocks, Mathematical proofs, Distributed Mutual Exclusion, Deadlock detection.
+  - **Unit IV:** Serverless execution paradigms, CAP Theorem trade-offs (PostgreSQL vs Redis).
+  - **Oral / Viva Exam Defense:** Top 15 technical questions and answers with direct code pointers.
+
+---
+
+## 👥 Authors & Acknowledgments
+
+- **Tanishq Tajne** ([GitHub](https://github.com/tanishqtajne25)) — Distributed Systems implementation, Lamport Logical Clock synchronization, pipeline optimization & curriculum mapping.
+- **Piyush Waghmare** ([GitHub](https://github.com/piyushwaghmare)) — Original architecture, sandbox design, full-stack implementation, and AWS deployment.
