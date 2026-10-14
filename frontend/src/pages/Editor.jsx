@@ -37,6 +37,10 @@ export default function Editor() {
     const [testResults, setTestResults] = useState(null);
     const [activeOutputTab, setActiveOutputTab] = useState('output');
 
+    // Distributed Systems: Lamport Logical Clock state (Unit III)
+    const [clientLamportClock, setClientLamportClock] = useState(0);
+    const [lamportTimeline, setLamportTimeline] = useState([]);
+
     const [showSuccess, setShowSuccess] = useState(false);
 
     // AI analysis
@@ -58,6 +62,22 @@ export default function Editor() {
         });
 
         socketRef.current.on('job-result', (data) => {        //Get the job available in the websocket channel
+            // Lamport Rule 2 on client receipt: L_client = max(L_client, L_incoming) + 1
+            if (data.lamportClock !== undefined) {
+                setClientLamportClock(prev => {
+                    const updated = Math.max(prev, Number(data.lamportClock)) + 1;
+                    if (data.lamportTimeline) {
+                        const finalTimeline = [...data.lamportTimeline, {
+                            node: 'Client (Browser)',
+                            event: data.status === 'running' ? 'Status: Running Received' : 'Final Result Received',
+                            clock: updated
+                        }];
+                        setLamportTimeline(finalTimeline);
+                    }
+                    return updated;
+                });
+            }
+
             if (data.status === 'running') {
              setStatus('running');
              return;    
@@ -137,12 +157,28 @@ export default function Editor() {
         setResult(null);
         setStatus('pending');
 
+        // Lamport Rule 1: L_client = L_client + 1 before sending message
+        const nextClock = clientLamportClock + 1;
+        setClientLamportClock(nextClock);
+        setLamportTimeline([
+            { node: 'Client (Browser)', event: 'Submit Code', clock: nextClock }
+        ]);
+
         try {
             const res = await api.post('/execute', {         //queue based FOR SUBMIT BUTTON
                 code,
                 language,
-                problemId: selectedProblem?.id || null
+                problemId: selectedProblem?.id || null,
+                lamportClock: nextClock
             });
+
+            if (res.data.lamportTimeline) {
+                setLamportTimeline(res.data.lamportTimeline);
+            }
+            if (res.data.lamportClock) {
+                // Lamport Rule 2 on receiving HTTP response
+                setClientLamportClock(prev => Math.max(prev, Number(res.data.lamportClock)));
+            }
 
             const { jobId } = res.data;
 
@@ -405,7 +441,23 @@ export default function Editor() {
     
     {/* Header */}
     <div style={styles.outputHeader}>
-        Output
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span>Output</span>
+            <span style={{
+                fontSize: '11px',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                background: 'rgba(0, 170, 255, 0.15)',
+                color: '#00aaff',
+                border: '1px solid rgba(0, 170, 255, 0.3)',
+                fontFamily: 'monospace',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px'
+            }}>
+                🕒 Lamport Clock: <strong>L={clientLamportClock}</strong>
+            </span>
+        </div>
         {status && (             //styling status using CSS
             <span style={{
                 ...styles.statusBadge,
@@ -464,6 +516,19 @@ export default function Editor() {
             }}
         >
             Test Cases
+        </button>
+        <button
+            onClick={() => setActiveOutputTab('lamport')}
+            style={{
+                ...styles.outputTab,
+                color: activeOutputTab === 'lamport'
+                    ? '#00aaff' : '#666',
+                borderBottom: activeOutputTab === 'lamport'
+                    ? '2px solid #00aaff'
+                    : '2px solid transparent'
+            }}
+        >
+            🕒 Lamport Clocks (DS)
         </button>
     </div>
 
@@ -683,6 +748,127 @@ export default function Editor() {
                    )}
                     </div>
                 )}
+            </div>
+        )}
+
+        {/* LAMPORT LOGICAL CLOCKS TAB (UNIT III) */}
+        {activeOutputTab === 'lamport' && (
+            <div style={{ padding: '4px 0' }}>
+                <div style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(0, 170, 255, 0.08)',
+                    border: '1px solid rgba(0, 170, 255, 0.25)',
+                    marginBottom: '16px'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#00aaff', fontWeight: 'bold' }}>
+                                Syllabus Unit III: Synchronization
+                            </span>
+                            <h3 style={{ margin: '4px 0 0', color: '#fff', fontSize: '16px' }}>
+                                Lamport's Logical Clock Algorithm
+                            </h3>
+                        </div>
+                        <div style={{
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            background: '#0d1829',
+                            border: '1px solid #00aaff',
+                            color: '#00aaff',
+                            fontSize: '18px',
+                            fontWeight: 'bold',
+                            fontFamily: 'monospace'
+                        }}>
+                            L = {clientLamportClock}
+                        </div>
+                    </div>
+                    <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#aaa', lineHeight: '1.5' }}>
+                        Tracks causal event ordering across asynchronous nodes without relying on synchronized physical clocks.
+                    </p>
+                </div>
+
+                {/* Causal Chain Timeline */}
+                <p style={styles.outputLabel}>Distributed Causal Timeline (a → b)</p>
+                {lamportTimeline.length === 0 ? (
+                    <p style={styles.placeholder}>
+                        Click ⬆ Submit to trigger the distributed Lamport clock event chain.
+                    </p>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                        {lamportTimeline.map((item, index) => (
+                            <div key={index} style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '10px 12px',
+                                borderRadius: '6px',
+                                background: '#18181b',
+                                border: '1px solid #27272a',
+                                borderLeft: '3px solid #00aaff'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        width: '22px',
+                                        height: '22px',
+                                        borderRadius: '50%',
+                                        background: 'rgba(0, 170, 255, 0.2)',
+                                        color: '#00aaff',
+                                        fontSize: '11px',
+                                        fontWeight: 'bold'
+                                    }}>
+                                        {index + 1}
+                                    </span>
+                                    <div>
+                                        <div style={{ color: '#fff', fontSize: '13px', fontWeight: '500' }}>
+                                            {item.event}
+                                        </div>
+                                        <div style={{ color: '#71717a', fontSize: '11px' }}>
+                                            Node: <span style={{ color: '#a1a1aa' }}>{item.node}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <span style={{
+                                    fontFamily: 'monospace',
+                                    fontSize: '13px',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    background: 'rgba(0, 170, 255, 0.15)',
+                                    color: '#00aaff',
+                                    border: '1px solid rgba(0, 170, 255, 0.3)'
+                                }}>
+                                    Clock: L={item.clock}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Mathematical Proof Card */}
+                <div style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    background: '#131316',
+                    border: '1px solid #27272a'
+                }}>
+                    <p style={{ margin: '0 0 6px', color: '#e4e4e7', fontSize: '13px', fontWeight: 'bold' }}>
+                        📐 Algorithm Rules Applied:
+                    </p>
+                    <ul style={{ margin: 0, paddingLeft: '18px', color: '#a1a1aa', fontSize: '12px', lineHeight: '1.6' }}>
+                        <li>
+                            <strong style={{ color: '#00aaff' }}>Rule 1 (Internal Event / Pre-Send):</strong> Before generating an event or sending message <em>m</em>, process <em>i</em> increments: <code>L_i = L_i + 1</code>.
+                        </li>
+                        <li>
+                            <strong style={{ color: '#00aaff' }}>Rule 2 (Message Reception):</strong> Upon receiving <em>(m, L_msg)</em>, process <em>j</em> updates its clock: <code>L_j = max(L_j, L_msg) + 1</code>.
+                        </li>
+                        <li>
+                            <strong style={{ color: '#00ff88' }}>Clock Condition:</strong> For any two events <em>a</em> and <em>b</em>, if <em>a → b</em> (causally precedes), then <em>L(a) &lt; L(b)</em>.
+                        </li>
+                    </ul>
+                </div>
             </div>
         )}
 

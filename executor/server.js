@@ -62,6 +62,9 @@ subscriber.connect()
     .then(() => console.log('Redis Subscriber Connected'))
     .catch(err => console.error('Redis Subscriber Error', err));
 
+// Lamport Logical Clock for API Gateway
+let serverLamportClock = 0;
+
 //subscribe to job results from worker.
 //When worker publishes ---> Server emits to WebSocket Room.
 
@@ -69,7 +72,21 @@ subscriber.pSubscribe('job-*', (message, channel) => {
     const result = JSON.parse(message);
     const jobId = channel.replace('job-', '');
 
-    console.log(`Received Result for job ${jobId}`);
+    // Lamport Rule 2: L_server = max(L_server, L_msg) + 1
+    const incomingClock = result.lamportClock || 0;
+    serverLamportClock = Math.max(serverLamportClock, incomingClock) + 1;
+
+    const timeline = Array.isArray(result.lamportTimeline) ? [...result.lamportTimeline] : [];
+    timeline.push({
+        node: 'API Gateway',
+        event: 'Websocket Relay',
+        clock: serverLamportClock
+    });
+
+    result.lamportClock = serverLamportClock;
+    result.lamportTimeline = timeline;
+
+    console.log(`Received Result for job ${jobId} (Lamport Clock: ${serverLamportClock})`);
     console.log(`Status: ${result.status}`);
 
     //Emit to Websocket Room for this job.
@@ -137,7 +154,7 @@ app.post('/run', verifyToken, async (req, res) => {
 });
 
 app.post('/execute', verifyToken, executeLimiter, async (req, res) => {
-    const { code, language, problemId } = req.body;
+    const { code, language, problemId, lamportClock } = req.body;
     const userId = req.user.id;
 
     if(!code || !language) {
@@ -152,6 +169,15 @@ app.post('/execute', verifyToken, executeLimiter, async (req, res) => {
             error: 'Code too long (max 50,000 characters)'
         });
     }
+
+    // Lamport Rule 2: L_server = max(L_server, L_client) + 1
+    const clientClock = parseInt(lamportClock, 10) || 0;
+    serverLamportClock = Math.max(serverLamportClock, clientClock) + 1;
+
+    const initialTimeline = [
+        { node: 'Client (Browser)', event: 'Submit Code', clock: clientClock },
+        { node: 'API Gateway', event: 'Job Queued in Redis', clock: serverLamportClock }
+    ];
 
     try {
         const submission = await pool.query(       //update in submission
@@ -169,17 +195,21 @@ app.post('/execute', verifyToken, executeLimiter, async (req, res) => {
             code,
             language,
             problemId: problemId || null,
-            userId: userId
+            userId: userId,
+            lamportClock: serverLamportClock,
+            lamportTimeline: initialTimeline
         });
 
-        console.log(`Job ${job.id} queued for submission ${submissionId}`);
+        console.log(`Job ${job.id} queued for submission ${submissionId} (Lamport Clock: ${serverLamportClock})`);
 
         res.json({       //Response with pending and submission to queue is successfull
             message: 'Submitted successfully',
             submissionId,
             jobId: job.id,
             status: 'pending',
-            checkStatus: `user/status/${submissionId}`
+            checkStatus: `user/status/${submissionId}`,
+            lamportClock: serverLamportClock,
+            lamportTimeline: initialTimeline
         });
 
     } catch (err) {
